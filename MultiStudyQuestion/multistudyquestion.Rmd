@@ -1,0 +1,139 @@
+---
+title: How might two small studies be better than one large study?
+author:
+- name: Jake Bowers
+  affiliation: SBST and University of Illinois
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+    html_document:
+      theme: cosmo
+      toc: yes
+    pdf_document:
+      keep_tex: true
+      number_sections: true
+      fig_width: 5
+      fig_height: 5
+      fig_caption: true
+...
+
+
+Since an unbiased and consistent estimator may be very far from the truth when
+sample sizes are low one might ask whether it is better to direct resources to
+running two (or more) smaller studies rather than putting all of one's eggs in
+one basket with one unbiased but possible far from the truth larger study.
+
+
+
+```{r}
+set.seed(1234568)
+popN <- 1000000
+popy <- rnorm(popN)
+trueMeanY <- mean(popy)
+trueMeanY
+
+calcmeans <- function(n,popy){
+	onemean <- mean(sample(popy,n,replace=FALSE))
+	twomeansA <- mean(sample(popy,n/2,replace=FALSE))
+	twomeansB <- mean(sample(popy,n/2,replace=FALSE))
+	return(c(one=onemean,twoA=twomeansA,twoB=twomeansB))
+}
+
+## Test the function
+calcmeans(10,popy)
+
+```
+
+Across many re-samples, all the sample means should be unbiased. (We see this
+below. The mean of the  means are approximately equal to the true mean --
+easily within sqrt(1/nsims) simulation error.) We also see that the sample mean
+is consistent --- the bias decreases as the sample size increases. I think that
+we can formalize this question simply as, "When is an estimator based on two
+means using smaller samples better than an estimator based one mean with a
+larger sample?" I'm side-stepping a version of this question whereby we are
+updating scientific beliefs about a population quantity and instead am just
+focusing on properties of estimators because I think that this is pretty close
+to the actual scientific question (When can we learn more from two small
+studies than from one large study) and is a lot easier to explore. I'm also
+doing this by simulation. The analytics here (in the setup I use below)
+actually are not that hard.
+
+
+```{r dosim,cache=TRUE}
+## Using all cores
+library(parallel)
+ncores <- detectCores()
+
+# ns <- c(10,20,50,100,200,500,1000,2000,5000,10000,50000,100000,500000,900000,950000)
+ns <- c(seq(8,120,by=4),seq(120,1000,by=20))
+ns <- unique(ns[ ns %% 2 == 0 ])
+
+nsims <- 100000
+
+set.seed(1234567)
+res <- mclapply(ns,function(n){
+			message(n)
+			replicate(nsims,calcmeans(n=n,popy))
+},mc.cores=ncores)
+save(res,file="multistudyquestion.rda")
+
+```
+
+```{r assessres}
+resArr <- simplify2array(res)
+dimnames(resArr)[[3]]<-ns
+
+twomeanEst <- apply(resArr[c("twoA","twoB"),,],c(2,3),mean)
+
+## Bias
+onemean <- abs( apply(resArr,c(1,3),mean) - trueMeanY )
+twomeanBias <- abs( apply(twomeanEst, 2, mean) - trueMeanY )
+biastab <- rbind(onemean,twomeanBias)
+
+## Variance
+onemeanSD <- apply(resArr,c(1,3),sd)
+twomeanSD <-  apply( twomeanEst , 2, sd)
+efftab <- rbind(onemeanSD,twomeanSD)
+
+## MSE
+## var + bias^2
+onemeanMSE <- apply(resArr,c(1,3),function(x){ var(x) + (mean(x) - trueMeanY)^2 })
+twomeanMSE <- apply(twomeanEst,2,function(x){ var(x) + (mean(x) - trueMeanY)^2 })
+msetab <- rbind(onemeanMSE,twomeanMSE)
+
+```
+
+
+```{r fig.width=8,fig.height=4}
+matplot(y=t(biastab),x=ns,axes=FALSE,ylab="Est. Bias",type="p",
+	lty=c(3,2,2,1),
+	lwd=c(1,1,1,2),
+	pch=c(22,20,20,1),
+	col=c("black","grey","grey","black"))
+segments(x0=ns,y0=t(biastab)[,4],x1=ns,y1=t(biastab)[,1])
+axis(1,labels=ns,at=ns)
+axis(2)
+```
+
+The following plot shows that the efficiency of the two-small-means averaged and the one-big mean estimators is the same (which makes perfect sense) until 90% of the population itself is sampled --- in that case, because of the finite sample, the one-big-mean estimator is better. And that that the one-small-mean estimators are worse than the other two.
+
+```{r fig.width=8,fig.height=4}
+matplot(y=t(efftab),x=ns,axes=FALSE,ylab="SE",type="b",
+	lty=c(4,2,2,1),
+	lwd=c(1,.5,.5,1),
+	pch=c(1,20,20,22),col="black")
+axis(1,labels=ns,at=ns)
+axis(2)
+```
+
+
+
+```{r fig.width=8,fig.height=4}
+matplot(y=t(msetab),x=ns,axes=FALSE,ylab="MSE",type="b",
+	lty=c(4,2,2,1),
+	lwd=c(1,1,1,2),
+	pch=c(1,20,20,22),col="black")
+axis(1,labels=ns,at=ns)
+axis(2)
+```
+
+
